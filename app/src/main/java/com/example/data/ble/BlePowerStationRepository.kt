@@ -49,11 +49,8 @@ class BlePowerStationRepository(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.device?.let { device ->
-                val name = device.name ?: ""
-                if (name.contains("ESP32") || name.contains("PowerStation") || name.contains("BMS")) {
-                    bluetoothAdapter?.bluetoothLeScanner?.stopScan(this)
-                    connectToDevice(device)
-                }
+                bluetoothAdapter?.bluetoothLeScanner?.stopScan(this)
+                connectToDevice(device)
             }
         }
     }
@@ -123,7 +120,7 @@ class BlePowerStationRepository(
         // For demonstration robustness in the absence of exact struct from user, 
         // we decode if length matches, OR fallback to string parsing if it's JSON/Comma separated.
         try {
-            val str = String(bytes)
+            val str = String(bytes).trim()
             if (str.contains(",")) {
                 // simple csv: V,A,Temp,SOC,Ah,Wh,Status
                 val parts = str.split(",")
@@ -168,15 +165,22 @@ class BlePowerStationRepository(
     }
 
     override fun startScanningAndConnect() {
-        if (bluetoothAdapter?.isEnabled == true) {
-            _connectionState.value = ConnectionState.SCANNING
-            bluetoothAdapter.bluetoothLeScanner?.startScan(scanCallback)
-        }
+        if (bluetoothAdapter?.isEnabled != true) return
+        _connectionState.value = ConnectionState.SCANNING
+
+        val filter = android.bluetooth.le.ScanFilter.Builder()
+            .setServiceUuid(android.os.ParcelUuid(SERVICE_UUID))
+            .build()
+        val settings = android.bluetooth.le.ScanSettings.Builder()
+            .setScanMode(android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
+        bluetoothAdapter.bluetoothLeScanner?.startScan(listOf(filter), settings, scanCallback)
     }
 
     private fun connectToDevice(device: BluetoothDevice) {
         _connectionState.value = ConnectionState.CONNECTING
-        currentGatt = device.connectGatt(context, false, gattCallback)
+        currentGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
     override fun disconnect() {
