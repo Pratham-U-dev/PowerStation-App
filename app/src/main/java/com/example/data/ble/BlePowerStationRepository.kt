@@ -7,6 +7,7 @@ import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.util.Log
 import com.example.domain.models.BatteryData
+import com.example.domain.models.BleDeviceInfo
 import com.example.domain.models.BatteryStatus
 import com.example.domain.models.ConnectionState
 import com.example.domain.repository.PowerStationRepository
@@ -35,6 +36,9 @@ class BlePowerStationRepository(
     private val _batteryData = MutableStateFlow(BatteryData())
     override val batteryData: StateFlow<BatteryData> = _batteryData.asStateFlow()
 
+    private val _scanResults = MutableStateFlow<List<BleDeviceInfo>>(emptyList())
+    override val scanResults: StateFlow<List<BleDeviceInfo>> = _scanResults.asStateFlow()
+
     private var currentGatt: BluetoothGatt? = null
     private var writeCharacteristic: BluetoothGattCharacteristic? = null
 
@@ -49,8 +53,23 @@ class BlePowerStationRepository(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.device?.let { device ->
-                bluetoothAdapter?.bluetoothLeScanner?.stopScan(this)
-                connectToDevice(device)
+                val name = device.name ?: "Unknown Device"
+                val address = device.address
+                val rssi = result.rssi
+                val isPowerStation = name.contains("PowerStation") || name.contains("ESP32") || name.contains("BMS")
+
+                val newInfo = BleDeviceInfo(name, address, rssi, isPowerStation)
+
+                _scanResults.update { currentList ->
+                    val existingIdx = currentList.indexOfFirst { it.address == address }
+                    if (existingIdx >= 0) {
+                        val mutableList = currentList.toMutableList()
+                        mutableList[existingIdx] = newInfo
+                        mutableList
+                    } else {
+                        currentList + newInfo
+                    }
+                }
             }
         }
     }
@@ -126,16 +145,20 @@ class BlePowerStationRepository(
                 val parts = str.split(",")
                 if (parts.size >= 7) {
                     val statusInt = parts[6].toIntOrNull() ?: 0
+                    val reserved = if (parts.size >= 8) parts[7].toIntOrNull() ?: 0 else 0
+                    val parsedTemp = parts[2].toFloatOrNull() ?: 0f
+                    
                     CoroutineScope(Dispatchers.IO).launch {
                         _batteryData.update {
                             it.copy(
                                 voltage = parts[0].toFloatOrNull() ?: 0f,
                                 current = parts[1].toFloatOrNull() ?: 0f,
-                                temperature = parts[2].toFloatOrNull() ?: 0f,
+                                temperature = parsedTemp,
                                 soc = parts[3].toIntOrNull() ?: 0,
                                 remainingCapacityAh = parts[4].toFloatOrNull() ?: 0f,
                                 remainingEnergyWh = parts[5].toFloatOrNull() ?: 0f,
-                                status = BatteryStatus.values().getOrElse(statusInt) { BatteryStatus.IDLE }
+                                status = BatteryStatus.values().getOrElse(statusInt) { BatteryStatus.IDLE },
+                                reservedEnergyWh = if (parts.size >= 8) reserved else it.reservedEnergyWh
                             )
                         }
                     }
@@ -167,15 +190,20 @@ class BlePowerStationRepository(
     override fun startScanningAndConnect() {
         if (bluetoothAdapter?.isEnabled != true) return
         _connectionState.value = ConnectionState.SCANNING
+        _scanResults.value = emptyList()
 
-        val filter = android.bluetooth.le.ScanFilter.Builder()
-            .setServiceUuid(android.os.ParcelUuid(SERVICE_UUID))
-            .build()
         val settings = android.bluetooth.le.ScanSettings.Builder()
             .setScanMode(android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        bluetoothAdapter.bluetoothLeScanner?.startScan(listOf(filter), settings, scanCallback)
+        bluetoothAdapter.bluetoothLeScanner?.startScan(null, settings, scanCallback)
+    }
+
+    override fun connectToAddress(address: String) {
+        if (bluetoothAdapter?.isEnabled != true) return
+        bluetoothAdapter.bluetoothLeScanner?.stopScan(scanCallback)
+        val device = bluetoothAdapter.getRemoteDevice(address)
+        connectToDevice(device)
     }
 
     private fun connectToDevice(device: BluetoothDevice) {
@@ -186,6 +214,7 @@ class BlePowerStationRepository(
     override fun disconnect() {
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(scanCallback)
         currentGatt?.disconnect()
+        _connectionState.value = ConnectionState.DISCONNECTED
     }
 
     override fun setEnergyReservation(wh: Int) {

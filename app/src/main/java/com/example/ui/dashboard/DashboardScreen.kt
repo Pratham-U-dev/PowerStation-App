@@ -39,7 +39,7 @@ fun DashboardScreen(viewModel: PowerStationViewModel) {
             .verticalScroll(scrollState)
     ) {
         TopBar(connectionState) {
-            if (connectionState == ConnectionState.DISCONNECTED) viewModel.connect() else viewModel.disconnect()
+            if (connectionState == ConnectionState.DISCONNECTED) viewModel.startScan() else viewModel.disconnect()
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -177,6 +177,7 @@ fun StatusCard(status: String, reserved: Int) {
 
 @Composable
 fun MetricsGrid(voltage: Float, current: Float, temp: Float, power: Float) {
+    val formattedTemp = if (temp <= -999f || temp.isNaN()) "--" else String.format("%.1f", temp)
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricBox("Voltage", String.format("%.2f", voltage), "V", Modifier.weight(1f))
@@ -185,7 +186,7 @@ fun MetricsGrid(voltage: Float, current: Float, temp: Float, power: Float) {
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricBox("Energy", String.format("%.1f", kotlin.math.abs(power)), "Wh", Modifier.weight(1f))
-            MetricBox("Internal", String.format("%.1f", temp), "°C", Modifier.weight(1f))
+            MetricBox("Internal", formattedTemp, "°C", Modifier.weight(1f))
         }
     }
 }

@@ -21,6 +21,9 @@ class PowerStationViewModel(application: Application) : AndroidViewModel(applica
     val connectionState: StateFlow<ConnectionState> = repository.connectionState
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ConnectionState.DISCONNECTED)
 
+    val scanResults = repository.scanResults
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val batteryData: StateFlow<BatteryData> = repository.batteryData
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), BatteryData())
 
@@ -28,10 +31,20 @@ class PowerStationViewModel(application: Application) : AndroidViewModel(applica
         .map { PredictionEngine.getIntelligenceSuggestions(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun connect() {
+    fun startScan() {
         if (connectionState.value == ConnectionState.DISCONNECTED) {
             repository.startScanningAndConnect()
         }
+    }
+
+    fun stopScan() {
+        if (connectionState.value == ConnectionState.SCANNING) {
+            repository.disconnect() // Calling disconnect will stop the scan inside the repo
+        }
+    }
+
+    fun connectToAddress(address: String) {
+        repository.connectToAddress(address)
     }
 
     fun disconnect() {
